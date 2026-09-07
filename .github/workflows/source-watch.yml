@@ -2,11 +2,11 @@ name: Private source watcher
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       force:
-        description: 'Forza il deploy anche se il commit sorgente non e cambiato'
+        description: 'Forza il deploy anche se il sorgente non è cambiato'
         type: boolean
         required: false
         default: false
@@ -24,39 +24,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      RUNNER_ENABLED: ${{ secrets.RUNNER_ENABLED }}
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
-      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
 
     steps:
-      - name: Abilitazione watcher
-        id: gate
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$RUNNER_ENABLED" = "true" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Watcher schedulato non ancora abilitato."
-          fi
-
-      - name: Verifica configurazione protetta
-        if: steps.gate.outputs.enabled == 'true'
+      - name: Verifica accesso sorgente privato
         shell: bash
         run: |
           set -euo pipefail
-          for name in PRIVATE_REPO PRIVATE_REPO_PAT; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Secret richiesto non configurato: $name"
-              exit 1
-            fi
-          done
+          test -n "$PRIVATE_REPO" || { echo "::error::PRIVATE_REPO mancante"; exit 1; }
+          test -n "$PRIVATE_REPO_PAT" || { echo "::error::PAT per repository privato mancante"; exit 1; }
 
       - name: Rileva versione privata senza pubblicarla
-        if: steps.gate.outputs.enabled == 'true'
         id: source
         env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
         shell: bash
         run: |
           set -euo pipefail
@@ -70,8 +52,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           unset sha
 
-      - name: Controlla se questa versione e gia stata elaborata
-        if: steps.gate.outputs.enabled == 'true'
+      - name: Controlla se questa versione è già stata elaborata
         id: source-cache
         uses: actions/cache/restore@v4
         with:
@@ -79,7 +60,7 @@ jobs:
           key: private-source-${{ steps.source.outputs.digest }}
 
       - name: Avvia deploy pubblico
-        if: steps.gate.outputs.enabled == 'true' && (inputs.force == true || steps.source-cache.outputs.cache-hit != 'true')
+        if: inputs.force == true || steps.source-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -87,13 +68,13 @@ jobs:
           echo "Nuova versione privata rilevata: deploy pubblico avviato."
 
       - name: Memorizza solo l'impronta della versione
-        if: steps.gate.outputs.enabled == 'true' && steps.source-cache.outputs.cache-hit != 'true'
+        if: steps.source-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p .private-source-state
           printf '%s\n' "${{ steps.source.outputs.digest }}" > .private-source-state/version
 
       - name: Salva impronta senza dati del repository privato
-        if: steps.gate.outputs.enabled == 'true' && steps.source-cache.outputs.cache-hit != 'true'
+        if: steps.source-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .private-source-state
