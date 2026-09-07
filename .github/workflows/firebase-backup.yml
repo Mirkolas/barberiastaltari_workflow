@@ -1,0 +1,74 @@
+name: Backup Firebase
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+    steps:
+      - name: Verifica configurazione protetta
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PRIVATE_REPO PRIVATE_REPO_PAT FIREBASE_SERVICE_ACCOUNT; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Secret richiesto non configurato: $name"
+              exit 1
+            fi
+          done
+
+      - name: Scarica sorgente privato
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ secrets.PRIVATE_REPO }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: main
+          fetch-depth: 0
+          path: source
+
+      - name: Configura Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Installa dipendenze
+        working-directory: source
+        run: npm install
+
+      - name: Esegui backup Firebase
+        working-directory: source
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: npm run backup
+
+      - name: Salva backup nel repository privato
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "firebase-backup-bot"
+          git config user.email "firebase-backup-bot@users.noreply.github.com"
+          git add backups/
+          if git diff --cached --quiet; then
+            echo "Nessun nuovo backup da salvare."
+            exit 0
+          fi
+          git commit -m "Automated Firebase backup"
+          git pull --rebase origin main
+          git push origin main
