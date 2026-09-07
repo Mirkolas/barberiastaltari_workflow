@@ -27,3 +27,5 @@ jobs:
           sleep 2
           gh workflow enable firebase-backup-auto.yml --repo "$GH_REPO"
           echo "Scheduled workflow registration refreshed."
+
+# trigger refresh
