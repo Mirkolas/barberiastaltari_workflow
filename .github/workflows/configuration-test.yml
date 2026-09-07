@@ -1,0 +1,55 @@
+name: Configuration test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/configuration-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+      RUNNER_ENABLED: ${{ secrets.RUNNER_ENABLED }}
+      APP_DIR: ${{ secrets.APP_DIR }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+    steps:
+      - name: Verifica configurazione senza mostrare valori
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PRIVATE_REPO PRIVATE_REPO_PAT FIREBASE_PROJECT_ID FIREBASE_SERVICE_ACCOUNT; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Secret mancante: $name"
+              exit 1
+            fi
+          done
+          node -e 'JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT); console.log("FIREBASE_SERVICE_ACCOUNT: formato JSON valido")'
+          echo "Configurazione di base valida. Nessun valore sensibile mostrato."
+
+      - name: Prova accesso al repository privato
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ secrets.PRIVATE_REPO }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: main
+          path: private-source-test
+          persist-credentials: false
+
+      - name: Verifica struttura minima del sorgente
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-source-test
+          if [ -n "${APP_DIR:-}" ]; then cd "$APP_DIR"; fi
+          test -f package.json
+          echo "Checkout privato e struttura applicazione: OK"
