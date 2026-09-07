@@ -9,37 +9,30 @@ permissions:
   contents: read
 
 concurrency:
-  group: firebase-deploy
+  group: firebase-deploy-barberiastaltari
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  test-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
-      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
-      APP_DIR: ${{ secrets.APP_DIR }}
-      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
 
     steps:
-      - name: Verifica configurazione protetta
+      - name: Verifica accesso sorgente privato
         shell: bash
         run: |
           set -euo pipefail
-          for name in PRIVATE_REPO PRIVATE_REPO_PAT FIREBASE_PROJECT_ID FIREBASE_SERVICE_ACCOUNT; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Secret richiesto non configurato: $name"
-              exit 1
-            fi
-          done
+          test -n "$PRIVATE_REPO" || { echo "::error::PRIVATE_REPO mancante"; exit 1; }
+          test -n "$PRIVATE_REPO_PAT" || { echo "::error::PAT per repository privato mancante"; exit 1; }
 
-      - name: Scarica sorgente privato
+      - name: Scarica repository privato
         uses: actions/checkout@v5
         with:
           repository: ${{ secrets.PRIVATE_REPO }}
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          token: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
           ref: main
           path: source
           persist-credentials: false
@@ -47,29 +40,21 @@ jobs:
       - name: Configura Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version: '22'
 
       - name: Esegui test statici
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd source
-          if [ -n "${APP_DIR:-}" ]; then cd "$APP_DIR"; fi
-          npm test
+        working-directory: source/barberiastaltari
+        run: npm test
 
       - name: Autentica Google Cloud
         uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          project_id: ${{ secrets.FIREBASE_PROJECT_ID }}
+          project_id: barberiastaltari
 
       - name: Installa Firebase CLI
         run: npm install --global firebase-tools@15.28.2
 
-      - name: Pubblica Firebase
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd source
-          if [ -n "${APP_DIR:-}" ]; then cd "$APP_DIR"; fi
-          firebase deploy --project "$FIREBASE_PROJECT_ID" --only hosting,firestore --non-interactive
+      - name: Deploy Hosting, regole e indici Firestore
+        working-directory: source/barberiastaltari
+        run: firebase deploy --project barberiastaltari --only hosting,firestore --non-interactive
