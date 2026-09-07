@@ -63,6 +63,7 @@ jobs:
         if: inputs.force == true || steps.source-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh workflow run firebase-deploy.yml --ref main
           echo "Nuova versione privata rilevata: deploy pubblico avviato."
