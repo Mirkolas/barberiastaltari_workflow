@@ -1,8 +1,6 @@
-name: Private source watcher
+name: Private source watcher manuale
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       force:
@@ -66,7 +64,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh workflow run firebase-deploy.yml --ref main
-          echo "Nuova versione privata rilevata: deploy pubblico avviato."
+          echo "Deploy avviato manualmente dal source watcher."
 
       - name: Memorizza solo l'impronta della versione
         if: steps.source-cache.outputs.cache-hit != 'true'
