@@ -1,7 +1,9 @@
-name: Backup Firebase manuale
+name: Backup Firebase
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "4 12 * * *"
 
 permissions:
   contents: read
