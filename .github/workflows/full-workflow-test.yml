@@ -1,0 +1,29 @@
+name: Full workflow test launcher
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/full-workflow-test.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Avvia tutti i workflow pubblici
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run configuration-test.yml --ref main
+          gh workflow run firebase-deploy.yml --ref main
+          gh workflow run firebase-backup.yml --ref main
+          gh workflow run firebase-restore.yml --ref main -f backup_folder=TEST-ONLY-DO-NOT-RESTORE -f confirmation=TEST
+          gh workflow run source-watch.yml --ref main -f force=false
+          echo 'Tutti i workflow sono stati accodati.'
