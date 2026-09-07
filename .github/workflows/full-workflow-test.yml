@@ -1,5 +1,6 @@
 name: Full workflow test launcher
 
+# test round: PAT read-write verified by owner
 on:
   push:
     branches: [main]
