@@ -17,65 +17,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUNNER_ENABLED: ${{ secrets.RUNNER_ENABLED }}
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
-      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
-      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
 
     steps:
-      - name: Abilitazione runner
-        id: gate
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$RUNNER_ENABLED" = "true" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Runner schedulato non ancora abilitato."
-          fi
-
-      - name: Verifica configurazione protetta
-        if: steps.gate.outputs.enabled == 'true'
+      - name: Verifica accesso sorgente privato
         shell: bash
         run: |
           set -euo pipefail
-          for name in PRIVATE_REPO PRIVATE_REPO_PAT FIREBASE_SERVICE_ACCOUNT; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Secret richiesto non configurato: $name"
-              exit 1
-            fi
-          done
+          test -n "$PRIVATE_REPO" || { echo "::error::PRIVATE_REPO mancante"; exit 1; }
+          test -n "$PRIVATE_REPO_PAT" || { echo "::error::PAT per repository privato mancante"; exit 1; }
 
-      - name: Scarica sorgente privato
-        if: steps.gate.outputs.enabled == 'true'
+      - name: Scarica repository privato
         uses: actions/checkout@v5
         with:
           repository: ${{ secrets.PRIVATE_REPO }}
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          token: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
           ref: main
           fetch-depth: 0
           path: source
 
       - name: Configura Node.js
-        if: steps.gate.outputs.enabled == 'true'
         uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version: '22'
 
       - name: Installa dipendenze
-        if: steps.gate.outputs.enabled == 'true'
         working-directory: source
         run: npm install
 
       - name: Esegui backup Firebase
-        if: steps.gate.outputs.enabled == 'true'
         working-directory: source
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: npm run backup
 
       - name: Salva backup nel repository privato
-        if: steps.gate.outputs.enabled == 'true'
         working-directory: source
         shell: bash
         run: |
@@ -87,6 +64,6 @@ jobs:
             echo "Nessun nuovo backup da salvare."
             exit 0
           fi
-          git commit -m "Automated Firebase backup"
+          git commit -m "Backup Firebase $(date -u '+%Y-%m-%d %H:%M UTC')"
           git pull --rebase origin main
           git push origin main
