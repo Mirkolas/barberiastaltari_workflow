@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       backup_folder:
-        description: 'Percorso della cartella di backup nel repository privato'
+        description: 'Cartella del backup nel repository privato'
         required: true
         type: string
       confirmation:
@@ -25,32 +25,28 @@ jobs:
     timeout-minutes: 30
     env:
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
-      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
-      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-      BACKUP_FOLDER: ${{ inputs.backup_folder }}
-      RESTORE_CONFIRMATION: ${{ inputs.confirmation }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
 
     steps:
-      - name: Verifica configurazione e conferma
-        shell: bash
+      - name: Controlla conferma
         run: |
-          set -euo pipefail
-          for name in PRIVATE_REPO PRIVATE_REPO_PAT FIREBASE_SERVICE_ACCOUNT; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Secret richiesto non configurato: $name"
-              exit 1
-            fi
-          done
-          if [ "$RESTORE_CONFIRMATION" != "RIPRISTINA" ]; then
-            echo "::error::Conferma non valida."
+          if [ "${{ inputs.confirmation }}" != "RIPRISTINA" ]; then
+            echo "Conferma non valida."
             exit 1
           fi
 
-      - name: Scarica sorgente privato
+      - name: Verifica accesso sorgente privato
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_REPO" || { echo "::error::PRIVATE_REPO mancante"; exit 1; }
+          test -n "$PRIVATE_REPO_PAT" || { echo "::error::PAT per repository privato mancante"; exit 1; }
+
+      - name: Scarica repository privato
         uses: actions/checkout@v5
         with:
           repository: ${{ secrets.PRIVATE_REPO }}
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          token: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
           ref: main
           path: source
           persist-credentials: false
@@ -58,7 +54,7 @@ jobs:
       - name: Configura Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version: '22'
 
       - name: Installa dipendenze
         working-directory: source
@@ -68,20 +64,21 @@ jobs:
         working-directory: source
         shell: bash
         run: |
-          set -euo pipefail
-          if [ ! -d "$BACKUP_FOLDER" ]; then
-            echo "::error::Cartella backup inesistente."
+          folder="${{ inputs.backup_folder }}"
+          if [ ! -d "$folder" ]; then
+            echo "Cartella backup inesistente."
             exit 1
           fi
           for file in firestore.json authentication.json metadata.json; do
-            if [ ! -f "$BACKUP_FOLDER/$file" ]; then
-              echo "::error::File di backup mancante: $file"
+            if [ ! -f "$folder/$file" ]; then
+              echo "$file non trovato."
               exit 1
             fi
           done
+          echo "Backup selezionato e struttura verificata."
 
       - name: Ripristina Firebase
         working-directory: source
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: node restore.js "$BACKUP_FOLDER" "$RESTORE_CONFIRMATION"
+        run: node restore.js "${{ inputs.backup_folder }}" "${{ inputs.confirmation }}"
