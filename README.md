@@ -1,30 +1,26 @@
 # Workflow runner
 
-Questo repository pubblico contiene soltanto i runner GitHub Actions. Il codice applicativo e i dati del repository sorgente restano privati e vengono scaricati solo sul runner temporaneo.
+Questo repository pubblico contiene soltanto i runner GitHub Actions. Il codice e i dati del repository sorgente restano privati e vengono scaricati soltanto sul runner temporaneo.
 
-## Rilevamento modifiche del sorgente
+## Configurazione
 
-`Private source watcher` viene eseguito ogni 15 minuti quando `RUNNER_ENABLED=true`. Usa il PAT per leggere soltanto il commit corrente di `main`, calcola una seconda impronta SHA-256 e conserva nella cache solo quell'impronta. Il nome del repository privato e lo SHA originale non vengono salvati nei file pubblici.
+La configurazione applicativa usa lo **stesso Secret del repository privato**:
 
-Quando rileva una nuova versione avvia `Deploy Firebase` nel repository pubblico. Il watcher puo essere eseguito manualmente con `force=true` per forzare il deploy.
+- `FIREBASE_SERVICE_ACCOUNT`
 
-## Secrets richiesti
+Non servono `APP_DIR`, `FIREBASE_PROJECT_ID` o `RUNNER_ENABLED`: erano valori aggiunti durante la prima migrazione e non fanno parte della configurazione originale del repository privato.
 
-Configura in **Settings → Secrets and variables → Actions**:
+Gli unici valori tecnici aggiuntivi necessari al runner pubblico sono:
 
-- `PRIVATE_REPO`: repository sorgente privato nel formato `owner/repository`.
-- `PRIVATE_REPO_PAT`: PAT con accesso al repository privato. Per il backup deve avere anche il permesso di scrivere nel repository sorgente, perche il backup viene committato li e non nel repository pubblico.
-- `RUNNER_ENABLED`: imposta esattamente `true` soltanto dopo i test manuali; abilita watcher e backup schedulato.
-- `APP_DIR`: opzionale, sottocartella dell'applicazione nel repository privato; lascia vuoto se l'app e nella root.
-- `FIREBASE_PROJECT_ID`: identificativo del progetto Firebase.
-- `FIREBASE_SERVICE_ACCOUNT`: JSON dell'account di servizio usato dai job Firebase.
+- Secret `PRIVATE_REPO`: repository sorgente privato nel formato `owner/repository`.
+- Secret PAT: preferibilmente `PRIVATE_REPO_PAT`. Per compatibilita i workflow riconoscono anche `PERSONAL_ACCESS_TOKEN`, `PAT`, `GH_PAT` o `GITHUB_PAT`. Deve poter leggere il repository privato; il backup deve anche poter eseguire push nel repository privato.
 
-## Cutover sicuro
+## Workflow
 
-1. Copia i secret qui e lascia `RUNNER_ENABLED` diverso da `true`.
-2. Avvia manualmente `Deploy Firebase` e `Backup Firebase`. I test manuali funzionano anche con i cron disabilitati.
-3. Per `Ripristino Firebase`, usa inizialmente soltanto una copia/backup di test e la conferma richiesta dal workflow.
-4. Quando deploy e backup pubblici sono riusciti, imposta `RUNNER_ENABLED=true`.
-5. Verifica almeno un ciclo del watcher e del backup pubblico; poi disattiva i vecchi trigger automatici nel repository privato per evitare doppie esecuzioni.
+- `Deploy Firebase`: scarica il sorgente privato, esegue gli stessi test e usa `secrets.FIREBASE_SERVICE_ACCOUNT`, come il workflow privato.
+- `Backup Firebase`: usa `secrets.FIREBASE_SERVICE_ACCOUNT` e salva il backup nel repository privato.
+- `Ripristino Firebase`: usa `secrets.FIREBASE_SERVICE_ACCOUNT` e legge il backup dal repository privato.
+- `Private source watcher`: ogni 15 minuti controlla la versione del sorgente e conserva nel pubblico soltanto un'impronta SHA-256; quando cambia avvia il deploy pubblico.
+- `Configuration test`: verifica il checkout privato, il JSON del service account e `npm test`, senza eseguire deploy.
 
-Nessun valore sensibile e hardcoded nei workflow pubblici; i workflow privati restano invariati come fallback finche non completi manualmente il passaggio delle credenziali.
+I workflow pubblici non richiedono copie rinominate delle credenziali originali.
