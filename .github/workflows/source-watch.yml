@@ -1,0 +1,100 @@
+name: Private source watcher
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Forza il deploy anche se il commit sorgente non e cambiato'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: private-source-watcher
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUNNER_ENABLED: ${{ secrets.RUNNER_ENABLED }}
+      PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+
+    steps:
+      - name: Abilitazione watcher
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$RUNNER_ENABLED" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Watcher schedulato non ancora abilitato."
+          fi
+
+      - name: Verifica configurazione protetta
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PRIVATE_REPO PRIVATE_REPO_PAT; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Secret richiesto non configurato: $name"
+              exit 1
+            fi
+          done
+
+      - name: Rileva versione privata senza pubblicarla
+        if: steps.gate.outputs.enabled == 'true'
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          sha="$(gh api "repos/${PRIVATE_REPO}/commits/main" --jq '.sha' 2>/dev/null || true)"
+          if [ -z "$sha" ]; then
+            echo "::error::Impossibile leggere il repository sorgente con il PAT configurato."
+            exit 1
+          fi
+          digest="$(printf '%s' "$sha" | sha256sum | cut -d' ' -f1)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          unset sha
+
+      - name: Controlla se questa versione e gia stata elaborata
+        if: steps.gate.outputs.enabled == 'true'
+        id: source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .private-source-state
+          key: private-source-${{ steps.source.outputs.digest }}
+
+      - name: Avvia deploy pubblico
+        if: steps.gate.outputs.enabled == 'true' && (inputs.force == true || steps.source-cache.outputs.cache-hit != 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run firebase-deploy.yml --ref main
+          echo "Nuova versione privata rilevata: deploy pubblico avviato."
+
+      - name: Memorizza solo l'impronta della versione
+        if: steps.gate.outputs.enabled == 'true' && steps.source-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .private-source-state
+          printf '%s\n' "${{ steps.source.outputs.digest }}" > .private-source-state/version
+
+      - name: Salva impronta senza dati del repository privato
+        if: steps.gate.outputs.enabled == 'true' && steps.source-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .private-source-state
+          key: private-source-${{ steps.source.outputs.digest }}
