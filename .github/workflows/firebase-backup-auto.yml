@@ -2,8 +2,13 @@ name: Backup Firebase automatico
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/firebase-backup-auto.yml'
   schedule:
-    - cron: "24 12 * * *"
+    - cron: "15 2 * * *"
 
 permissions:
   contents: read
