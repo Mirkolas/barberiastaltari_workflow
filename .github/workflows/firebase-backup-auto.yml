@@ -8,7 +8,7 @@ on:
     paths:
       - '.github/workflows/firebase-backup-auto.yml'
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "15 2 * * *"
 
 permissions:
   contents: read
