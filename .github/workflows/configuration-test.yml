@@ -16,10 +16,7 @@ jobs:
     timeout-minutes: 10
     env:
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
-      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT }}
-      RUNNER_ENABLED: ${{ secrets.RUNNER_ENABLED }}
-      APP_DIR: ${{ secrets.APP_DIR }}
-      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
     steps:
@@ -28,30 +25,24 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in PRIVATE_REPO PRIVATE_REPO_PAT FIREBASE_PROJECT_ID FIREBASE_SERVICE_ACCOUNT; do
+          for name in PRIVATE_REPO PRIVATE_REPO_PAT FIREBASE_SERVICE_ACCOUNT; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Configurazione mancante: $name"
               missing=1
             fi
           done
           if [ "$missing" -ne 0 ]; then exit 1; fi
-          node -e 'JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT); console.log("FIREBASE_SERVICE_ACCOUNT: formato JSON valido")'
-          echo "Configurazione di base valida. Nessun valore sensibile mostrato."
+          node -e 'JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT); console.log("FIREBASE_SERVICE_ACCOUNT: JSON valido")'
 
       - name: Prova accesso al repository privato
         uses: actions/checkout@v5
         with:
           repository: ${{ secrets.PRIVATE_REPO }}
-          token: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT }}
+          token: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
           ref: main
           path: private-source-test
           persist-credentials: false
 
-      - name: Verifica struttura minima del sorgente
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd private-source-test
-          if [ -n "${APP_DIR:-}" ]; then cd "$APP_DIR"; fi
-          test -f package.json
-          echo "Checkout privato e struttura applicazione: OK"
+      - name: Esegui test applicazione senza deploy
+        working-directory: private-source-test/barberiastaltari
+        run: npm test
