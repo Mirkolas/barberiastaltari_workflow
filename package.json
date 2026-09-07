@@ -1,0 +1,12 @@
+{
+  "name": "barberiastaltari-firebase-backup-workflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runtime pubblico per il backup Firebase di Barberia Staltari",
+  "scripts": {
+    "backup": "node backup.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.4.0"
+  }
+}
