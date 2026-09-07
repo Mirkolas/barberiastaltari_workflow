@@ -1,9 +1,7 @@
-name: Backup Firebase
+name: Backup Firebase manuale
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "15 2 * * *"
 
 permissions:
   contents: read
@@ -40,7 +38,7 @@ jobs:
       - name: Configura Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: Installa dipendenze
         working-directory: source
@@ -51,6 +49,14 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: npm run backup
+
+      - name: Controlla backup generato
+        working-directory: source
+        run: |
+          echo "Backup disponibili:"
+          ls -lah backups
+          echo ""
+          find backups -maxdepth 2 -type f -print
 
       - name: Salva backup nel repository privato
         working-directory: source
