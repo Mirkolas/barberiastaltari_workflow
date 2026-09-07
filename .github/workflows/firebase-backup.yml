@@ -17,12 +17,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      RUNNER_ENABLED: ${{ secrets.RUNNER_ENABLED }}
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
       PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
     steps:
+      - name: Abilitazione runner
+        id: gate
+        shell: bash
+        run: |
+          if [ "$RUNNER_ENABLED" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Runner schedulato non ancora abilitato."
+          fi
+
       - name: Verifica configurazione protetta
+        if: steps.gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -34,6 +47,7 @@ jobs:
           done
 
       - name: Scarica sorgente privato
+        if: steps.gate.outputs.enabled == 'true'
         uses: actions/checkout@v5
         with:
           repository: ${{ secrets.PRIVATE_REPO }}
@@ -43,21 +57,25 @@ jobs:
           path: source
 
       - name: Configura Node.js
+        if: steps.gate.outputs.enabled == 'true'
         uses: actions/setup-node@v5
         with:
           node-version: "22"
 
       - name: Installa dipendenze
+        if: steps.gate.outputs.enabled == 'true'
         working-directory: source
         run: npm install
 
       - name: Esegui backup Firebase
+        if: steps.gate.outputs.enabled == 'true'
         working-directory: source
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: npm run backup
 
       - name: Salva backup nel repository privato
+        if: steps.gate.outputs.enabled == 'true'
         working-directory: source
         shell: bash
         run: |
