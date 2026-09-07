@@ -18,6 +18,7 @@ jobs:
       - name: Avvia tutti i workflow pubblici
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
