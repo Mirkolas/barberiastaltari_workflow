@@ -3,8 +3,7 @@ name: Backup Firebase
 on:
   workflow_dispatch:
   schedule:
-    # Test temporaneo automatico: 13:42 Europe/Rome = 11:42 UTC.
-    - cron: "42 11 * * *"
+    - cron: "15 2 * * *"
 
 permissions:
   contents: read
