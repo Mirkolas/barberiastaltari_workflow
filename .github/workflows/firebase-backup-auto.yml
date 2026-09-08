@@ -6,6 +6,8 @@ on:
     - cron: "15 2 * * *"
     - cron: "15 3 * * *"
     - cron: "15 4 * * *"
+    - cron: "15 5 * * *"
+    - cron: "15 6 * * *"
 
 permissions:
   contents: read
