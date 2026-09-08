@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "15 2 * * *"
+    - cron: "15 3 * * *"
+    - cron: "15 4 * * *"
 
 permissions:
   contents: read
@@ -23,33 +25,6 @@ jobs:
       - name: Scarica repository pubblico
         uses: actions/checkout@v5
 
-      - name: Configura Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-
-      - name: Installa dipendenze backup
-        run: npm install
-
-      - name: Esegui backup Firebase nel runner pubblico
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: npm run backup
-
-      - name: Controlla backup generato
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Backup generato nel runner pubblico:"
-          find backups -maxdepth 2 -type f -print
-
-          new_backup="$(find backups -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tail -n 1)"
-          test -n "$new_backup" || { echo "::error::Nessuna cartella backup generata"; exit 1; }
-
-          for file in firestore.json authentication.json metadata.json; do
-            test -f "backups/$new_backup/$file" || { echo "::error::$file non trovato nel backup"; exit 1; }
-          done
-
       - name: Verifica accesso repository privato
         shell: bash
         run: |
@@ -65,7 +40,67 @@ jobs:
           fetch-depth: 0
           path: private-backup
 
+      - name: Controlla se il backup giornaliero e gia riuscito
+        id: daily-backup
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          set -euo pipefail
+          day="$(date -u '+%Y-%m-%d')"
+          found=""
+
+          if [ -d private-backup/backups ]; then
+            while IFS= read -r candidate; do
+              if [ -f "$candidate/firestore.json" ] \
+                && [ -f "$candidate/authentication.json" ] \
+                && [ -f "$candidate/metadata.json" ]; then
+                found="$candidate"
+                break
+              fi
+            done < <(find private-backup/backups -mindepth 1 -maxdepth 1 -type d -name "${day}T*" -print | sort -r)
+          fi
+
+          if [ -n "$found" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Backup UTC di oggi gia presente e valido: $found. Questo tentativo schedulato termina senza creare duplicati."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Nessun backup UTC valido per $day: eseguo questo tentativo."
+          fi
+
+      - name: Configura Node.js
+        if: steps.daily-backup.outputs.skip != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Installa dipendenze backup
+        if: steps.daily-backup.outputs.skip != 'true'
+        run: npm install
+
+      - name: Esegui backup Firebase nel runner pubblico
+        if: steps.daily-backup.outputs.skip != 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: npm run backup
+
+      - name: Controlla backup generato
+        if: steps.daily-backup.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Backup generato nel runner pubblico:"
+          find backups -maxdepth 2 -type f -print
+
+          new_backup="$(find backups -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tail -n 1)"
+          test -n "$new_backup" || { echo "::error::Nessuna cartella backup generata"; exit 1; }
+
+          for file in firestore.json authentication.json metadata.json; do
+            test -f "backups/$new_backup/$file" || { echo "::error::$file non trovato nel backup"; exit 1; }
+          done
+
       - name: Salva backup nel repository privato
+        if: steps.daily-backup.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -84,7 +119,7 @@ jobs:
 
           if [ "${#backup_folders[@]}" -ge 5 ]; then
             latest="${backup_folders[$((${#backup_folders[@]} - 1))]}"
-            echo "Raggiunti ${#backup_folders[@]} backup. Conservo solo il più recente: $latest"
+            echo "Raggiunti ${#backup_folders[@]} backup. Conservo solo il piu recente: $latest"
             for folder in "${backup_folders[@]}"; do
               if [ "$folder" != "$latest" ]; then
                 echo "Elimino backups/$folder"
