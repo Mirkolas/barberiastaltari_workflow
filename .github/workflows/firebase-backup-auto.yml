@@ -41,7 +41,7 @@ jobs:
           path: private-backup
 
       - name: Controlla se il backup giornaliero e gia riuscito
-        id: daily-backup
+        id: daily_backup
         if: github.event_name == 'schedule'
         shell: bash
         run: |
@@ -69,23 +69,23 @@ jobs:
           fi
 
       - name: Configura Node.js
-        if: steps.daily-backup.outputs.skip != 'true'
+        if: steps.daily_backup.outputs.skip != 'true'
         uses: actions/setup-node@v5
         with:
           node-version: "22"
 
       - name: Installa dipendenze backup
-        if: steps.daily-backup.outputs.skip != 'true'
+        if: steps.daily_backup.outputs.skip != 'true'
         run: npm install
 
       - name: Esegui backup Firebase nel runner pubblico
-        if: steps.daily-backup.outputs.skip != 'true'
+        if: steps.daily_backup.outputs.skip != 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: npm run backup
 
       - name: Controlla backup generato
-        if: steps.daily-backup.outputs.skip != 'true'
+        if: steps.daily_backup.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -100,7 +100,7 @@ jobs:
           done
 
       - name: Salva backup nel repository privato
-        if: steps.daily-backup.outputs.skip != 'true'
+        if: steps.daily_backup.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
