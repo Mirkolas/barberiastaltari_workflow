@@ -80,7 +80,7 @@ jobs:
         if: steps.daily_backup.outputs.skip != 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: npm run backup
+        run: node backup-root-only.js
 
       - name: Controlla backup generato
         if: steps.daily_backup.outputs.skip != 'true'
