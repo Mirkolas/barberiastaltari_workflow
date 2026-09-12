@@ -44,11 +44,12 @@ jobs:
         working-directory: source
         run: npm install
 
-      - name: Esegui backup Firebase
+      - name: Esegui backup Firebase senza scansione ricorsiva
         working-directory: source
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: npm run backup
+        run: |
+          node -e 'const { DocumentReference } = require("firebase-admin/firestore"); DocumentReference.prototype.listCollections = async function () { return []; }; console.log("Modalita Spark: backup delle sole collection root; scansione subcollection disabilitata."); require("./backup.js");'
 
       - name: Controlla backup generato
         working-directory: source
