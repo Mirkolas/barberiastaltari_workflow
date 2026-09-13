@@ -15,9 +15,8 @@ const SOURCE_ROOT = process.argv[2] || process.env.BACKUP_SOURCE_ROOT || path.jo
 const OUTPUT_ROOT = process.argv[3] || process.env.BACKUP_OUTPUT_ROOT || path.join(__dirname, "backups");
 const CHANGELOG_COLLECTION = process.env.BACKUP_CHANGELOG_COLLECTION || "logs";
 const LEGACY_CHECKPOINT_SAFETY_MS = 10 * 60 * 1000;
+const AUTH_FULL_REFRESH_MAX_AGE_DAYS = Math.max(1, Number(process.env.AUTH_FULL_REFRESH_MAX_AGE_DAYS || 28));
 
-// Collection tecniche piccole o con cancellazioni non sempre rappresentate nei log.
-// Vengono riallineate integralmente; il grosso dei dati resta incrementale.
 const FALLBACK_COLLECTIONS = [
   "availability",
   "activeBookings",
@@ -28,8 +27,6 @@ const FALLBACK_COLLECTIONS = [
   "admins",
 ];
 
-// Campi temporali gia presenti nel sito. Servono come rete di sicurezza per
-// mutazioni applicative che non producono ancora un audit log dedicato.
 const TIMESTAMP_CHANGE_FIELDS = {
   bookings: ["updatedAt", "createdAt", "cancelledAt", "confirmedAt", "completedAt", "noShowAt"],
   users: ["updatedAt", "createdAt"],
@@ -108,11 +105,21 @@ function serializeMultiFactor(user) {
   };
 }
 
+function summarizeAuthentication(users) {
+  let passwordUsers = 0;
+  let passwordHashes = 0;
+  for (const user of users || []) {
+    const hasPasswordProvider = (user.providerData || []).some(provider => provider.providerId === "password");
+    if (!hasPasswordProvider) continue;
+    passwordUsers += 1;
+    if (user.passwordHash) passwordHashes += 1;
+  }
+  return { passwordUsers, passwordHashes };
+}
+
 async function exportAuthentication() {
   const users = [];
   const missingPasswordHashes = [];
-  let passwordUsers = 0;
-  let passwordHashes = 0;
   let pageToken;
 
   do {
@@ -127,11 +134,7 @@ async function exportAuthentication() {
         providerId: provider.providerId,
       }));
       const hasPasswordProvider = providerData.some(provider => provider.providerId === "password");
-      if (hasPasswordProvider) {
-        passwordUsers += 1;
-        if (user.passwordHash) passwordHashes += 1;
-        else missingPasswordHashes.push(user.uid);
-      }
+      if (hasPasswordProvider && !user.passwordHash) missingPasswordHashes.push(user.uid);
       users.push({
         uid: user.uid,
         email: user.email || null,
@@ -164,7 +167,7 @@ async function exportAuthentication() {
     );
   }
 
-  return { users, passwordUsers, passwordHashes };
+  return { users, ...summarizeAuthentication(users) };
 }
 
 function collectCandidateRefs(log) {
@@ -174,7 +177,6 @@ function collectCandidateRefs(log) {
     if (collection && id) refs.push({ collection, id: String(id) });
   };
 
-  // Compatibilita con gli audit log gia prodotti dal sito.
   switch (log.type) {
     case "booking_created":
     case "booking_updated":
@@ -210,8 +212,6 @@ function resolvePreviousCheckpoint(previous) {
     throw new Error("metadata.createdAt del backup precedente non valido.");
   }
 
-  // I vecchi backup non registravano l'istante di inizio. Torniamo indietro di
-  // qualche minuto: rileggere una modifica gia applicata e idempotente, perderla no.
   return {
     date: new Date(createdAt.getTime() - LEGACY_CHECKPOINT_SAFETY_MS),
     legacySafetyWindow: true,
@@ -237,8 +237,6 @@ async function addTimestampCandidates(refs, sinceDate) {
         }
         queryStats.push({ collection: collectionName, field, matches: snap.size });
       } catch (error) {
-        // Un campo assente non genera errore; questo catch protegge da configurazioni
-        // Firestore particolari senza trasformare una rete di sicurezza in un blocco.
         console.warn(`Query incrementale ${collectionName}.${field} non riuscita:`, error.message || error);
         queryStats.push({ collection: collectionName, field, error: String(error.message || error) });
       }
@@ -315,9 +313,32 @@ function purgeDeletedAuthUsers(state, previousAuthentication, currentAuthenticat
   return deletedUids;
 }
 
+function authRefreshDecision(previous, logs, changed, now) {
+  const reasons = [];
+
+  if (logs.some(log => ["register_success", "auth_changed", "account_deleted"].includes(log.type))) {
+    reasons.push("auth-event");
+  }
+
+  if (changed.some(item => item.collection === "users")) {
+    reasons.push("user-profile-change");
+  }
+
+  const lastFullRaw = previous.metadata.lastFullAuthenticationAt || previous.metadata.createdAt;
+  const lastFull = new Date(lastFullRaw || 0);
+  const maxAgeMs = AUTH_FULL_REFRESH_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  if (Number.isNaN(lastFull.getTime()) || now.getTime() - lastFull.getTime() >= maxAgeMs) {
+    reasons.push("periodic-reconciliation");
+  }
+
+  return {
+    refresh: reasons.length > 0,
+    reasons,
+    lastFullAuthenticationAt: Number.isNaN(lastFull.getTime()) ? null : lastFull.toISOString(),
+  };
+}
+
 async function main() {
-  // Questo istante e il checkpoint della prossima esecuzione. Viene preso prima
-  // di qualunque lettura per evitare finestre cieche durante il backup.
   const changeCheckpointAt = new Date();
   const previous = getPreviousState();
   if (!previous) {
@@ -344,12 +365,23 @@ async function main() {
   const fallback = await refreshFallbackCollections(state);
   refreshLogsCollection(state, logs);
 
-  const authenticationBackup = await exportAuthentication();
-  const deletedAuthUsers = purgeDeletedAuthUsers(
-    state,
-    previous.authentication,
-    authenticationBackup.users
-  );
+  const authDecision = authRefreshDecision(previous, logs, changed, changeCheckpointAt);
+  let authenticationBackup;
+  let deletedAuthUsers = [];
+  let lastFullAuthenticationAt = authDecision.lastFullAuthenticationAt;
+
+  if (authDecision.refresh) {
+    authenticationBackup = await exportAuthentication();
+    lastFullAuthenticationAt = new Date().toISOString();
+    deletedAuthUsers = purgeDeletedAuthUsers(
+      state,
+      previous.authentication,
+      authenticationBackup.users
+    );
+  } else {
+    const users = clone(previous.authentication || []);
+    authenticationBackup = { users, ...summarizeAuthentication(users) };
+  }
 
   const folderName = safeTimestamp();
   const out = path.join(OUTPUT_ROOT, folderName);
@@ -358,7 +390,7 @@ async function main() {
   fs.writeFileSync(path.join(out, "firestore.json"), JSON.stringify(state, null, 2));
   fs.writeFileSync(path.join(out, "authentication.json"), JSON.stringify(authenticationBackup.users, null, 2));
   fs.writeFileSync(path.join(out, "metadata.json"), JSON.stringify({
-    schemaVersion: 3,
+    schemaVersion: 4,
     backupMode: "incremental",
     baseBackup: path.basename(previous.folder),
     createdAt: new Date().toISOString(),
@@ -373,6 +405,10 @@ async function main() {
     timestampQueries,
     fallbackCollectionsRefreshed: fallback,
     deletedAuthenticationUsersPurged: deletedAuthUsers,
+    authenticationMode: authDecision.refresh ? "full-refresh" : "reused-previous",
+    authenticationRefreshReasons: authDecision.reasons,
+    authenticationFullRefreshMaxAgeDays: AUTH_FULL_REFRESH_MAX_AGE_DAYS,
+    lastFullAuthenticationAt,
     authenticationUsers: authenticationBackup.users.length,
     authenticationPasswordUsers: authenticationBackup.passwordUsers,
     authenticationPasswordHashes: authenticationBackup.passwordHashes,
@@ -386,6 +422,11 @@ async function main() {
   console.log(`Log letti: ${logs.length}`);
   console.log(`Documenti puntuali riletti: ${changed.length}`);
   console.log(`Collection fallback riallineate: ${fallback.map(item => item.collection).join(", ")}`);
+  if (authDecision.refresh) {
+    console.log(`Authentication riletta: ${authDecision.reasons.join(", ")}`);
+  } else {
+    console.log("Authentication invariata: riuso authentication.json precedente senza listUsers().");
+  }
   if (deletedAuthUsers.length) {
     console.log(`Utenti eliminati rimossi dalla copia: ${deletedAuthUsers.length}`);
   }
