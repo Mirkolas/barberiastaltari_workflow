@@ -6,6 +6,11 @@ on:
     paths:
       - '.github/workflows/configuration-test.yml'
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Branch o commit del sorgente da verificare'
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -13,10 +18,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
-      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
     steps:
@@ -38,10 +43,33 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ${{ secrets.PRIVATE_REPO }}
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: main
+          token: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
+          ref: ${{ inputs.source_ref || 'main' }}
           path: private-source-test
           persist-credentials: false
+
+      - name: Configura Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Configura Java per Firestore Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Installa dipendenze di test bloccate
+        working-directory: private-source-test/barberiastaltari
+        run: npm ci
+
+      - name: Verifica comportamento delle prenotazioni e delle email
+        working-directory: private-source-test/barberiastaltari
+        run: npm run test:behavior
+
+      - name: Verifica regole su database demo isolato
+        working-directory: private-source-test/barberiastaltari
+        run: npx --yes firebase-tools@15.28.2 emulators:exec --config firebase.test.json --project demo-staltari-audit --only firestore 'node --test tests/firestore.test.mjs'
 
       - name: Esegui test applicazione senza deploy
         working-directory: private-source-test/barberiastaltari

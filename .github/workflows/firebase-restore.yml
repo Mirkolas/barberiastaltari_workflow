@@ -24,13 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      RESTORE_CONFIRMATION: ${{ inputs.confirmation }}
+      BACKUP_FOLDER: ${{ inputs.backup_folder }}
       PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
       PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
 
     steps:
       - name: Controlla conferma
         run: |
-          if [ "${{ inputs.confirmation }}" != "RIPRISTINA" ]; then
+          if [ "$RESTORE_CONFIRMATION" != "RIPRISTINA" ]; then
             echo "Conferma non valida."
             exit 1
           fi
@@ -58,13 +60,15 @@ jobs:
 
       - name: Installa dipendenze
         working-directory: source
-        run: npm install
+        run: npm ci
 
       - name: Controlla backup
         working-directory: source
         shell: bash
         run: |
-          folder="${{ inputs.backup_folder }}"
+          set -euo pipefail
+          [[ "$BACKUP_FOLDER" =~ ^backups/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z$ ]] || { echo "Cartella backup non valida"; exit 1; }
+          folder="$BACKUP_FOLDER"
           if [ ! -d "$folder" ]; then
             echo "Cartella backup inesistente."
             exit 1
@@ -81,4 +85,4 @@ jobs:
         working-directory: source
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: node restore.js "${{ inputs.backup_folder }}" "${{ inputs.confirmation }}"
+        run: node restore.js "$BACKUP_FOLDER" "$RESTORE_CONFIRMATION"

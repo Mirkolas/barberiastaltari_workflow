@@ -6,7 +6,6 @@ on:
       force:
         description: 'Forza il deploy anche se il sorgente non è cambiato'
         type: boolean
-        required: false
         default: false
 
 permissions:
@@ -15,66 +14,64 @@ permissions:
 
 concurrency:
   group: private-source-watcher
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   watch:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
-      PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
-
+    outputs:
+      digest: ${{ steps.source.outputs.digest }}
+      deploy: ${{ steps.decision.outputs.deploy }}
     steps:
-      - name: Verifica accesso sorgente privato
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$PRIVATE_REPO" || { echo "::error::PRIVATE_REPO mancante"; exit 1; }
-          test -n "$PRIVATE_REPO_PAT" || { echo "::error::PAT per repository privato mancante"; exit 1; }
-
-      - name: Rileva versione privata senza pubblicarla
+      - name: Rileva soltanto la versione del sito
         id: source
         env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || secrets.PERSONAL_ACCESS_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_PAT }}
         shell: bash
         run: |
           set -euo pipefail
-          set +x
-          sha="$(gh api "repos/${PRIVATE_REPO}/commits/main" --jq '.sha' 2>/dev/null || true)"
-          if [ -z "$sha" ]; then
-            echo "::error::Impossibile leggere il repository sorgente con il PAT configurato."
-            exit 1
-          fi
-          digest="$(printf '%s' "$sha" | sha256sum | cut -d' ' -f1)"
+          test -n "$PRIVATE_REPO" && test -n "$GH_TOKEN"
+          tree="$(gh api "repos/${PRIVATE_REPO}/contents/barberiastaltari?ref=main" --jq 'sort_by(.path) | map([.path,.sha]) | tostring')"
+          digest="$(printf '%s' "$tree" | sha256sum | cut -d' ' -f1)"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          unset sha
-
-      - name: Controlla se questa versione è già stata elaborata
-        id: source-cache
+      - name: Leggi ultima pubblicazione riuscita
+        id: deployed
         uses: actions/cache/restore@v4
         with:
           path: .private-source-state
-          key: private-source-${{ steps.source.outputs.digest }}
-
-      - name: Avvia deploy pubblico
-        if: inputs.force == true || steps.source-cache.outputs.cache-hit != 'true'
+          key: deployed-site-${{ steps.source.outputs.digest }}
+      - name: Decidi se pubblicare
+        id: decision
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          FORCE: ${{ inputs.force }}
+          HIT: ${{ steps.deployed.outputs.cache-hit }}
         run: |
-          gh workflow run firebase-deploy.yml --ref main
-          echo "Deploy avviato manualmente dal source watcher."
+          if [ "$FORCE" = "true" ] || [ "$HIT" != "true" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Memorizza solo l'impronta della versione
-        if: steps.source-cache.outputs.cache-hit != 'true'
+  deploy:
+    needs: watch
+    if: needs.watch.outputs.deploy == 'true'
+    uses: ./.github/workflows/firebase-deploy.yml
+    secrets: inherit
+
+  record-success:
+    needs: [watch, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Memorizza soltanto una pubblicazione riuscita
+        env:
+          DIGEST: ${{ needs.watch.outputs.digest }}
         run: |
           mkdir -p .private-source-state
-          printf '%s\n' "${{ steps.source.outputs.digest }}" > .private-source-state/version
-
-      - name: Salva impronta senza dati del repository privato
-        if: steps.source-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+          printf '%s\n' "$DIGEST" > .private-source-state/version
+      - uses: actions/cache/save@v4
         with:
           path: .private-source-state
-          key: private-source-${{ steps.source.outputs.digest }}
+          key: deployed-site-${{ needs.watch.outputs.digest }}

@@ -75,15 +75,13 @@ jobs:
 
       - name: Installa dipendenze backup
         if: steps.weekly_backup.outputs.skip != 'true'
-        run: npm install
+        run: npm ci
 
-      - name: Esegui backup Firebase incrementale
+      - name: Esegui backup Firebase completo
         if: steps.weekly_backup.outputs.skip != 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          BACKUP_SOURCE_ROOT: ${{ github.workspace }}/private-backup/backups
-          BACKUP_OUTPUT_ROOT: ${{ github.workspace }}/backups
-        run: node incremental-backup.js
+        run: node backup.js
 
       - name: Controlla backup generato
         if: steps.weekly_backup.outputs.skip != 'true'
@@ -118,17 +116,11 @@ jobs:
               | sort
           )
 
-          if [ "${#backup_folders[@]}" -ge 5 ]; then
-            latest="${backup_folders[$((${#backup_folders[@]} - 1))]}"
-            echo "Raggiunti ${#backup_folders[@]} backup. Conservo solo il piu recente: $latest"
-            for folder in "${backup_folders[@]}"; do
-              if [ "$folder" != "$latest" ]; then
-                echo "Elimino backups/$folder"
-                rm -rf "private-backup/backups/$folder"
-              fi
+          count=${#backup_folders[@]}
+          if [ "$count" -gt 4 ]; then
+            for folder in "${backup_folders[@]:0:$((count - 4))}"; do
+              rm -rf "private-backup/backups/$folder"
             done
-          else
-            echo "Backup presenti dopo il nuovo salvataggio: ${#backup_folders[@]}. Nessuna pulizia necessaria."
           fi
 
           cd private-backup
@@ -141,6 +133,6 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Backup Firebase incrementale $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git commit -m "Backup Firebase completo $(date -u '+%Y-%m-%d %H:%M UTC')"
           git pull --rebase origin main
           git push origin main
