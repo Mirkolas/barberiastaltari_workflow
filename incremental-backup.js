@@ -1,4 +1,6 @@
-const admin = require("firebase-admin");
+const { initializeApp, cert } = require("firebase-admin/app");
+const { getFirestore, Timestamp, GeoPoint, DocumentReference } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
 const fs = require("fs");
 const path = require("path");
 
@@ -7,9 +9,9 @@ if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
 }
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
-const auth = admin.auth();
+initializeApp({ credential: cert(serviceAccount) });
+const db = getFirestore();
+const auth = getAuth();
 
 const SOURCE_ROOT = process.argv[2] || process.env.BACKUP_SOURCE_ROOT || path.join(__dirname, "private-backup", "backups");
 const OUTPUT_ROOT = process.argv[3] || process.env.BACKUP_OUTPUT_ROOT || path.join(__dirname, "backups");
@@ -41,14 +43,14 @@ function serializeValue(value) {
   if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
     return { __type: "bytes", base64: Buffer.from(value).toString("base64") };
   }
-  if (value instanceof admin.firestore.Timestamp) {
+  if (value instanceof Timestamp) {
     return { __type: "timestamp", seconds: value.seconds, nanoseconds: value.nanoseconds };
   }
   if (value instanceof Date) return { __type: "date", iso: value.toISOString() };
-  if (value instanceof admin.firestore.GeoPoint) {
+  if (value instanceof GeoPoint) {
     return { __type: "geopoint", latitude: value.latitude, longitude: value.longitude };
   }
-  if (value instanceof admin.firestore.DocumentReference) {
+  if (value instanceof DocumentReference) {
     return { __type: "reference", path: value.path };
   }
   if (Array.isArray(value)) return value.map(serializeValue);
@@ -219,13 +221,13 @@ function resolvePreviousCheckpoint(previous) {
 }
 
 async function fetchLogsSince(date) {
-  const since = admin.firestore.Timestamp.fromDate(date);
+  const since = Timestamp.fromDate(date);
   const snapshot = await db.collection(CHANGELOG_COLLECTION).where("createdAt", ">", since).get();
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
 async function addTimestampCandidates(refs, sinceDate) {
-  const since = admin.firestore.Timestamp.fromDate(sinceDate);
+  const since = Timestamp.fromDate(sinceDate);
   const queryStats = [];
 
   for (const [collectionName, fields] of Object.entries(TIMESTAMP_CHANGE_FIELDS)) {

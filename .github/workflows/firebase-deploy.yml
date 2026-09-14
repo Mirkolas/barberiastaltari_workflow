@@ -1,6 +1,7 @@
 name: Deploy Firebase
 
 on:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -39,6 +40,24 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '22'
+
+      - name: Configura Java per Firestore Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Installa dipendenze di test bloccate
+        working-directory: source/barberiastaltari
+        run: npm ci
+
+      - name: Verifica comportamento delle prenotazioni e delle email
+        working-directory: source/barberiastaltari
+        run: npm run test:behavior
+
+      - name: Verifica regole su database demo isolato
+        working-directory: source/barberiastaltari
+        run: npx --yes firebase-tools@15.28.2 emulators:exec --config firebase.test.json --project demo-staltari-audit --only firestore 'node --test tests/firestore.test.mjs'
 
       - name: Esegui test statici
         working-directory: source/barberiastaltari

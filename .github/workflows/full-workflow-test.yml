@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Avvia tutti i workflow pubblici
+      - name: Verifica configurazione senza modificare la produzione
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -20,8 +20,4 @@ jobs:
         run: |
           set -euo pipefail
           gh workflow run configuration-test.yml --ref main
-          gh workflow run firebase-deploy.yml --ref main
-          gh workflow run firebase-backup.yml --ref main
-          gh workflow run firebase-restore.yml --ref main -f backup_folder=TEST-ONLY-DO-NOT-RESTORE -f confirmation=TEST
-          gh workflow run source-watch.yml --ref main -f force=false
-          echo 'Tutti i workflow sono stati accodati manualmente.'
+          echo 'Verifica configurazione accodata; nessun deploy, backup o restore eseguito.'

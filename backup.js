@@ -1,4 +1,6 @@
-const admin = require("firebase-admin");
+const { initializeApp, cert } = require("firebase-admin/app");
+const { getFirestore, Timestamp, GeoPoint, DocumentReference } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
 const fs = require("fs");
 const path = require("path");
 
@@ -8,12 +10,12 @@ if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+initializeApp({
+  credential: cert(serviceAccount),
 });
 
-const db = admin.firestore();
-const auth = admin.auth();
+const db = getFirestore();
+const auth = getAuth();
 
 function safeTimestamp() {
   return new Date()
@@ -38,7 +40,7 @@ function cleanupOldBackups(backupsRoot) {
     return;
   }
 
-  const foldersToDelete = backupFolders.slice(0, backupFolders.length - 1);
+  const foldersToDelete = backupFolders.slice(0, backupFolders.length - 4);
 
   console.log("");
   console.log(`Raggiunti ${backupFolders.length} backup. Pulizia backup vecchi...`);
@@ -49,7 +51,7 @@ function cleanupOldBackups(backupsRoot) {
     fs.rmSync(folderPath, { recursive: true, force: true });
   }
 
-  console.log("Pulizia completata. Conservato solo il backup più recente.");
+  console.log("Pulizia completata. Conservati i quattro backup più recenti.");
 }
 
 function serializeValue(value) {
@@ -64,7 +66,7 @@ function serializeValue(value) {
     };
   }
 
-  if (value instanceof admin.firestore.Timestamp) {
+  if (value instanceof Timestamp) {
     return {
       __type: "timestamp",
       seconds: value.seconds,
@@ -79,7 +81,7 @@ function serializeValue(value) {
     };
   }
 
-  if (value instanceof admin.firestore.GeoPoint) {
+  if (value instanceof GeoPoint) {
     return {
       __type: "geopoint",
       latitude: value.latitude,
@@ -87,7 +89,7 @@ function serializeValue(value) {
     };
   }
 
-  if (value instanceof admin.firestore.DocumentReference) {
+  if (value instanceof DocumentReference) {
     return {
       __type: "reference",
       path: value.path,
@@ -270,6 +272,7 @@ async function main() {
 
   const metadata = {
     schemaVersion: 2,
+    backupMode: "full-recursive",
     createdAt: new Date().toISOString(),
     projectId: serviceAccount.project_id,
     firestoreCollections: firestoreBackup.collections,
